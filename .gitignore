@@ -1,0 +1,50 @@
+# Ignore macOS system files
+.DS_Store
+
+# Ignore Linux system files
+*~
+
+# Ignore Visual Studio Code settings
+.vscode/
+.vscode/*
+
+# Ignore JetBrains IDEs (e.g., IntelliJ, PyCharm, WebStorm, etc.)
+.idea/
+*.iml
+*.iws
+out/
+
+# Ignore common SQL editor/IDE files
+*.sublime-workspace
+*.sublime-project
+
+# Ignore log files
+*.log
+
+# Ignore temporary files created by editors
+*.swp
+*.tmp
+*.bak
+*.old
+*.orig
+
+# Ignore backups
+*.sql.bak
+
+# Ignore compiled binary files
+*.out
+*.o
+*.a
+*.so
+
+# Ignore Thumbs.db (Windows-specific, but in case someone uses Windows)
+Thumbs.db
+
+# Ignore SQL dump files
+*.sql.dump
+
+# Ignore any environment variable files
+.env
+
+# Ignore any other system-specific hidden files
+._*
