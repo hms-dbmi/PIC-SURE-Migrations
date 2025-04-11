@@ -11,7 +11,7 @@ INSERT INTO `userMetadataMapping` VALUES
 
 -- Create an ADFS user for each of the ldap-connector users. 
 -- We preserve the ability to roll back to the ldap-connector if necessary and also preserve the UUIDs for audit purposes
- insert into user 
+ insert into user (uuid, auth0_metadata, general_metadata, acceptedTOS, connectionId, email, matched, subject, is_active, long_term_token)
    (select UNHEX(REPLACE(uuid(), '-', '')), NULL, general_metadata, acceptedTOS, @uuidADFSConn, email,0x00,NULL, is_active, NULL
     from user where connectionId=@uuidLDAPConn);
 
