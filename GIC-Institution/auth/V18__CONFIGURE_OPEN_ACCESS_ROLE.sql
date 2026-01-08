@@ -1,5 +1,5 @@
 
-@uuidRole = REPLACE(UUID(),'-','');
+SET @uuidRole := REPLACE(UUID(), '-', '');
 INSERT INTO `role` (`uuid`, `name`, `description`) VALUES
 (unhex(@uuidRole), 'MANUAL_ROLE_OPEN_ACCESS', 'Role for users with open access to PIC-SURE data');
 
