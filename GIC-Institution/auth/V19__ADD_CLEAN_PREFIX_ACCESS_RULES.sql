@@ -1,4 +1,4 @@
--- Phase 3: additive gateway clean-prefix rules; legacy /proxy rules retained until Phase 7 (WildFly decommission).
+-- Additive gateway clean-prefix rules; legacy /proxy rules retained until WildFly is decommissioned.
 
 SET @allDictCleanPrefixRequests = unhex(REPLACE(UUID(),'-',''));
 -- Access rule for allowing requests to the dictionary via the gateway clean-prefix path

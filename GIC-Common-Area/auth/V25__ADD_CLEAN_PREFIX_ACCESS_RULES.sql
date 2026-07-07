@@ -1,4 +1,4 @@
--- Phase 3: additive gateway clean-prefix rules; legacy /proxy rules retained until Phase 7 (WildFly decommission).
+-- Additive gateway clean-prefix rules; legacy /proxy rules retained until WildFly is decommissioned.
 --
 -- Note: this environment (GIC-Common-Area) only has a legacy access rule for the dictionary
 -- proxy path (V23__ADD_DICTIONARY_ACCESS_RULE.sql, linked to PIC_SURE_ANY_QUERY). There is no

@@ -1,4 +1,4 @@
--- Phase 3: additive gateway clean-prefix rule for visualization; legacy /proxy path kept until Phase 7.
+-- Additive gateway clean-prefix rule for visualization; legacy /proxy path kept until WildFly is decommissioned.
 
 SET @allVizCleanPrefixRequests = unhex(REPLACE(UUID(),'-',''));
 -- Access rule for allowing requests to visualization via the gateway clean-prefix path

@@ -1,6 +1,6 @@
 use picsure;
 
--- Gateway rewrite (Phase 7): routing moved to the gateway's static per-service routes and the
+-- Gateway rewrite: routing moved to the gateway's static per-service routes and the
 -- resource registry endpoints were removed, so the resource table is unused. Drop the
 -- query -> resource foreign key (the resourceId column stays for historical rows) and then the
 -- table itself. Baseline flavor only for now -- the GIC flavors keep the table until the
