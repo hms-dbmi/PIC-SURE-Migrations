@@ -8,14 +8,18 @@ add_migration="$repo_root/Baseline/auth/V6__ADD_BANNER_MANAGEMENT_ACCESS_RULE.sq
 expand_migration="$repo_root/Baseline/auth/V7__EXPAND_BANNER_MANAGEMENT_ACCESS_RULE.sql"
 reorder_migration="$repo_root/Baseline/auth/V8__AUTHORIZE_BANNER_REORDER.sql"
 disable_migration="$repo_root/Baseline/auth/V9__ALLOW_BANNER_DISABLE_ROUTE.sql"
+archive_migration="$repo_root/Baseline/auth/V10__ALLOW_BANNER_ARCHIVE_ROUTE.sql"
 container="banner-auth-aio-${GITHUB_RUN_ID:-local}-$$"
 password="banner-auth-test"
 
-for file in "$fixture" "$before" "$add_migration" "$expand_migration" "$reorder_migration" "$disable_migration"; do
+for file in "$fixture" "$before" "$add_migration" "$expand_migration" "$reorder_migration" "$disable_migration" "$archive_migration"; do
   test -f "$file" || { echo "Missing required file: $file" >&2; exit 1; }
 done
-paths=("$(realpath "$add_migration")" "$(realpath "$expand_migration")" "$(realpath "$reorder_migration")" "$(realpath "$disable_migration")")
-test "$(printf '%s\n' "${paths[@]}" | sort -u | wc -l | tr -d ' ')" = "4"
+paths=(
+  "$(realpath "$add_migration")" "$(realpath "$expand_migration")" "$(realpath "$reorder_migration")"
+  "$(realpath "$disable_migration")" "$(realpath "$archive_migration")"
+)
+test "$(printf '%s\n' "${paths[@]}" | sort -u | wc -l | tr -d ' ')" = "5"
 
 cleanup() {
   docker rm -f "$container" >/dev/null 2>&1 || true
@@ -43,6 +47,8 @@ mysql_exec -e "UPDATE auth.access_rule SET value = 'unexpected-pre-reorder-value
 mysql_exec < "$reorder_migration"
 mysql_exec -e "UPDATE auth.access_rule SET value = 'unexpected-pre-disable-value' WHERE name = 'AR_BANNER_MANAGEMENT_GATEWAY';"
 mysql_exec < "$disable_migration"
+mysql_exec -e "UPDATE auth.access_rule SET value = 'unexpected-pre-archive-value' WHERE name = 'AR_BANNER_MANAGEMENT_GATEWAY';"
+mysql_exec < "$archive_migration"
 
 pattern="$(mysql_exec -e "SELECT value FROM auth.access_rule WHERE name = 'AR_BANNER_MANAGEMENT_GATEWAY';")"
 granted_roles="$(mysql_exec -e "
