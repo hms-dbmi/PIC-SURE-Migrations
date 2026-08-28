@@ -1,0 +1,13 @@
+name: Banner version migration
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  mysql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute the deployment migration on MySQL
+        run: tests/banner-version-migration/test.sh Baseline/picsure/V11__CREATE_BANNER_VERSION.sql
