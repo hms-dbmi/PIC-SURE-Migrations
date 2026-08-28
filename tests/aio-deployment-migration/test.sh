@@ -491,10 +491,15 @@ assert_schema() {
 
     assert_equal "$(mysql_exec --execute="
         SELECT CONCAT(
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_occurrence' AND constraint_name='PRIMARY'), ':',
             (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_occurrence' AND constraint_name='PRIMARY' AND column_name='uuid' AND ordinal_position=1), ':',
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_version' AND constraint_name='PRIMARY'), ':',
             (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_version' AND constraint_name='PRIMARY' AND column_name='uuid' AND ordinal_position=1), ':',
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_priority_allocator' AND constraint_name='PRIMARY'), ':',
             (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_priority_allocator' AND constraint_name='PRIMARY' AND column_name='id' AND ordinal_position=1), ':',
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_occurrence' AND constraint_name='fk_banner_occurrence_restore'), ':',
             (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_occurrence' AND constraint_name='fk_banner_occurrence_restore' AND column_name='restored_from_uuid' AND referenced_table_schema='picsure' AND referenced_table_name='banner_occurrence' AND referenced_column_name='uuid'), ':',
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_version' AND constraint_name='fk_banner_version_occurrence'), ':',
             (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_version' AND constraint_name='fk_banner_version_occurrence' AND column_name='banner_uuid' AND referenced_table_schema='picsure' AND referenced_table_name='banner_occurrence' AND referenced_column_name='uuid'), ':',
             (SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema='picsure' AND table_name='banner_version' AND constraint_name='uq_banner_version_number' AND constraint_type='UNIQUE'), ':',
             (SELECT GROUP_CONCAT(column_name ORDER BY ordinal_position) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_version' AND constraint_name='uq_banner_version_number'), ':',
@@ -502,7 +507,7 @@ assert_schema() {
             (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema='picsure' AND table_name='banner_occurrence' AND index_name='idx_banner_occurrence_active'), ':',
             (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema='picsure' AND table_name='banner_occurrence' AND index_name='idx_banner_occurrence_priority')
         );")" \
-        "1:1:1:1:1:1:banner_uuid,version_number:(id=1):status,start_at,end_at,priority:priority" \
+        "1:1:1:1:1:1:1:1:1:1:1:banner_uuid,version_number:(id=1):status,start_at,end_at,priority:priority" \
         "banner constraints and indexes"
 }
 
