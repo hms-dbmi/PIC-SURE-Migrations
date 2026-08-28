@@ -2,6 +2,7 @@ name: Banner authorization migration
 
 on:
   push:
+    branches: [main]
     paths:
       - 'Baseline/auth/V6__ADD_BANNER_MANAGEMENT_ACCESS_RULE.sql'
       - 'Baseline/auth/V7__EXPAND_BANNER_MANAGEMENT_ACCESS_RULE.sql'

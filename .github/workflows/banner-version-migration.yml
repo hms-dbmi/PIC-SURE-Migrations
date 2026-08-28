@@ -1,13 +1,28 @@
 name: Banner version migration
 
 on:
-  pull_request:
   push:
+    branches: [main]
+    paths:
+      - 'Baseline/picsure/V10__CREATE_BANNER_OCCURRENCE.sql'
+      - 'Baseline/picsure/V11__CREATE_BANNER_VERSION.sql'
+      - 'tests/banner-version-migration/**'
+      - '.github/workflows/banner-version-migration.yml'
+  pull_request:
+    paths:
+      - 'Baseline/picsure/V10__CREATE_BANNER_OCCURRENCE.sql'
+      - 'Baseline/picsure/V11__CREATE_BANNER_VERSION.sql'
+      - 'tests/banner-version-migration/**'
+      - '.github/workflows/banner-version-migration.yml'
 
 jobs:
   mysql:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Execute the deployment migration on MySQL
-        run: tests/banner-version-migration/test.sh Baseline/picsure/V11__CREATE_BANNER_VERSION.sql
+        run: >-
+          tests/banner-version-migration/test.sh
+          Baseline/picsure/V10__CREATE_BANNER_OCCURRENCE.sql
+          Baseline/picsure/V11__CREATE_BANNER_VERSION.sql
