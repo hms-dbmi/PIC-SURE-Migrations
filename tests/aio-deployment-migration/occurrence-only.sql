@@ -20,7 +20,14 @@ INSERT INTO picsure.banner_occurrence (
     UUID_TO_BIN('00000000-0000-0000-0000-000000000003'),
     'SAVED', '<p>Saved banner</p>', 'Saved metadata', 'ERROR', 'NONE', TRUE,
     'SIGNED_OUT', 'SITE_TOP', JSON_ARRAY(JSON_OBJECT('kind', 'ALL')),
-    NULL, NULL, 9, REPEAT('c', 64),
+    NULL, NULL, 90, REPEAT('c', 64),
     '2026-08-27 09:00:00.000000', 'creator@example.org', '2026-08-27 09:00:00.000000',
     'creator@example.org', NULL, NULL
+), (
+    UUID_TO_BIN('00000000-0000-0000-0000-000000000004'),
+    'PUBLISHED', '<p>Expired banner</p>', 'Expired metadata', 'ERROR', 'ERROR', FALSE,
+    'EVERYONE', 'SITE_TOP', JSON_ARRAY(JSON_OBJECT('kind', 'ALL')),
+    '2000-01-01 00:00:00.000000', '2000-02-01 00:00:00.000000', 80, REPEAT('d', 64),
+    '1999-12-31 22:00:00.000000', 'creator@example.org', '2000-01-01 01:00:00.000000',
+    'updater@example.org', '2000-01-01 00:00:00.000000', 'expired-publisher@example.org'
 );

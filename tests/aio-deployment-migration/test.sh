@@ -5,11 +5,19 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test_dir="$repo_root/tests/aio-deployment-migration"
 cell="${1:-all}"
 
-mysql_image="mysql:8.0"
+mysql_image="mysql:8.0.43@sha256:ccf4fed7ff4b886aeb3573a1f5d5b509525ecff55a2d1e2653c27a5abdded309"
 flyway_image="flyway/flyway:11.7.2"
+release_control_url="https://github.com/hms-dbmi/baseline-pic-sure-release-control.git"
+psama_url="https://github.com/hms-dbmi/pic-sure-auth-microapp.git"
+psa_url="https://github.com/hms-dbmi/pic-sure.git"
+psm_url="https://github.com/hms-dbmi/PIC-SURE-Migrations.git"
 release_control_sha="78c8a9efde3989afae9f137dac583c739667f59d"
+psama_tag="v4.2.2"
+psama_tag_sha="67dd3cc549c60388d200ac7078ef53c6c676a95d"
 psama_sha="ca8ac3641ba122a93cda8a5d7cad7f23f7a46bb6"
+psa_tag="v2.27.2"
 psa_sha="88a767c273af776ca1edeb7be4d4365393e376f7"
+psm_tag="v1.0.5"
 psm_sha="84ad03076ce9f69f27ebb51d0efa5d3d43114ea4"
 application_uuid="11111111111111111111111111111111"
 resource_uuid="22222222222222222222222222222222"
@@ -20,15 +28,8 @@ mysql_container="$test_id-mysql"
 tmp_parent="${TMPDIR:-/tmp}"
 tmp_parent="${tmp_parent%/}"
 tmp_root="$(mktemp -d "$tmp_parent/$test_id.XXXXXX")"
+executed_results="$tmp_root/executed-results.tsv"
 source_root="${AIO_PROOF_SOURCE_ROOT:-$tmp_root/sources}"
-
-case "$cell" in
-    all|fresh|supported-upgrade|occurrence-only) ;;
-    *)
-        echo "usage: $0 [all|fresh|supported-upgrade|occurrence-only]" >&2
-        exit 2
-        ;;
-esac
 
 cleanup() {
     docker rm -f "$mysql_container" >/dev/null 2>&1 || true
@@ -40,9 +41,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+case "$cell" in
+    all|fresh|supported-upgrade|occurrence-only) ;;
+    *)
+        echo "usage: $0 [all|fresh|supported-upgrade|occurrence-only]" >&2
+        exit 2
+        ;;
+esac
+
 required_files=(
     "$test_dir/matrix.tsv"
     "$test_dir/feature-sql.sha256"
+    "$test_dir/occurrence-intermediate-sql.sha256"
     "$test_dir/banner-schema.tsv"
     "$test_dir/supported-data.sql"
     "$test_dir/occurrence-only.sql"
@@ -53,6 +63,24 @@ for file in "${required_files[@]}"; do
     test -f "$file" || { echo "Missing required file: $file" >&2; exit 2; }
 done
 
+retry() {
+    local description="$1"
+    local attempt
+    shift
+
+    for attempt in 1 2 3; do
+        if "$@"; then
+            return 0
+        fi
+        if [[ "$attempt" != 3 ]]; then
+            echo "$description failed on attempt $attempt; retrying" >&2
+            sleep "$attempt"
+        fi
+    done
+    echo "$description failed after 3 attempts" >&2
+    return 1
+}
+
 checkout_commit() {
     local url="$1"
     local sha="$2"
@@ -60,37 +88,108 @@ checkout_commit() {
 
     git init --quiet "$destination"
     git -C "$destination" remote add origin "$url"
-    git -C "$destination" fetch --quiet --depth 1 origin "$sha"
+    retry "Fetching $url at $sha" \
+        git -C "$destination" fetch --quiet --depth 1 origin "$sha"
     git -C "$destination" checkout --quiet --detach FETCH_HEAD
-    test "$(git -C "$destination" rev-parse HEAD)" = "$sha"
+}
+
+checkout_tag() {
+    local url="$1"
+    local tag="$2"
+    local destination="$3"
+
+    git init --quiet "$destination"
+    git -C "$destination" remote add origin "$url"
+    retry "Fetching $url tag $tag" \
+        git -C "$destination" fetch --quiet --depth 1 origin \
+        "refs/tags/$tag:refs/tags/$tag"
+    git -C "$destination" checkout --quiet --detach "$tag^{commit}"
+}
+
+assert_checkout() {
+    local label="$1"
+    local checkout="$2"
+    local expected_sha="$3"
+    local actual_sha
+    local status
+
+    actual_sha="$(git -C "$checkout" rev-parse HEAD 2>/dev/null)" || {
+        echo "$label is not a Git checkout: $checkout" >&2
+        exit 1
+    }
+    if [[ "$actual_sha" != "$expected_sha" ]]; then
+        echo "$label checkout SHA mismatch: expected $expected_sha, got $actual_sha" >&2
+        exit 1
+    fi
+    if git -C "$checkout" symbolic-ref --quiet HEAD >/dev/null; then
+        echo "$label checkout must be detached at $expected_sha" >&2
+        exit 1
+    fi
+    status="$(git -C "$checkout" status --porcelain --untracked-files=all)"
+    if [[ -n "$status" ]]; then
+        echo "$label checkout contains modified or untracked inputs:" >&2
+        printf '%s\n' "$status" >&2
+        exit 1
+    fi
+}
+
+assert_tag() {
+    local label="$1"
+    local checkout="$2"
+    local tag="$3"
+    local expected_tag_sha="$4"
+    local expected_commit_sha="$5"
+    local actual_tag_sha
+    local actual_commit_sha
+
+    actual_tag_sha="$(git -C "$checkout" rev-parse "refs/tags/$tag" 2>/dev/null)" || {
+        echo "$label checkout is missing tag $tag" >&2
+        exit 1
+    }
+    actual_commit_sha="$(git -C "$checkout" rev-parse "refs/tags/$tag^{commit}" 2>/dev/null)" || {
+        echo "$label tag $tag does not resolve to a commit" >&2
+        exit 1
+    }
+    if [[ "$actual_tag_sha" != "$expected_tag_sha" ]]; then
+        echo "$label tag $tag mismatch: expected $expected_tag_sha, got $actual_tag_sha" >&2
+        exit 1
+    fi
+    if [[ "$actual_commit_sha" != "$expected_commit_sha" ]]; then
+        echo "$label tag $tag commit mismatch: expected $expected_commit_sha, got $actual_commit_sha" >&2
+        exit 1
+    fi
 }
 
 prepare_sources() {
     if [[ -z "${AIO_PROOF_SOURCE_ROOT:-}" ]]; then
         mkdir -p "$source_root"
-        checkout_commit https://github.com/hms-dbmi/baseline-pic-sure-release-control.git \
+        checkout_commit "$release_control_url" \
             "$release_control_sha" "$source_root/release-control"
-        checkout_commit https://github.com/hms-dbmi/pic-sure-auth-microapp.git \
-            "$psama_sha" "$source_root/psama"
-        checkout_commit https://github.com/hms-dbmi/pic-sure.git \
-            "$psa_sha" "$source_root/psa"
-        checkout_commit https://github.com/hms-dbmi/PIC-SURE-Migrations.git \
-            "$psm_sha" "$source_root/migrations"
+        checkout_tag "$psama_url" "$psama_tag" "$source_root/psama"
+        checkout_tag "$psa_url" "$psa_tag" "$source_root/psa"
+        checkout_tag "$psm_url" "$psm_tag" "$source_root/migrations"
     fi
 
-    test "$(git -C "$source_root/release-control" rev-parse HEAD)" = "$release_control_sha"
-    test "$(git -C "$source_root/psama" rev-parse HEAD)" = "$psama_sha"
-    test "$(git -C "$source_root/psa" rev-parse HEAD)" = "$psa_sha"
-    test "$(git -C "$source_root/migrations" rev-parse HEAD)" = "$psm_sha"
+    assert_checkout "Release control" "$source_root/release-control" "$release_control_sha"
+    assert_checkout "PSAMA" "$source_root/psama" "$psama_sha"
+    assert_checkout "PSA" "$source_root/psa" "$psa_sha"
+    assert_checkout "PSM" "$source_root/migrations" "$psm_sha"
+    assert_tag "PSAMA" "$source_root/psama" "$psama_tag" "$psama_tag_sha" "$psama_sha"
+    assert_tag "PSA" "$source_root/psa" "$psa_tag" "$psa_sha" "$psa_sha"
+    assert_tag "PSM" "$source_root/migrations" "$psm_tag" "$psm_sha" "$psm_sha"
 
-    python3 - "$source_root/release-control/build-spec.json" <<'PY'
+    python3 - \
+        "$source_root/release-control/build-spec.json" \
+        "$psa_tag" \
+        "$psama_tag" \
+        "$psm_tag" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     builds = {entry["project_job_git_key"]: entry["git_hash"] for entry in json.load(handle)["application"]}
 
-expected = {"PSA": "v2.27.2", "PSAMA": "v4.2.2", "PSM": "v1.0.5"}
+expected = {"PSA": sys.argv[2], "PSAMA": sys.argv[3], "PSM": sys.argv[4]}
 actual = {key: builds.get(key) for key in expected}
 assert actual == expected, (actual, expected)
 PY
@@ -114,8 +213,10 @@ verify_release_overlap() {
     done
 }
 
-verify_feature_checksums() {
-    python3 - "$repo_root" "$test_dir/feature-sql.sha256" <<'PY'
+verify_checksum_manifest() {
+    local manifest="$1"
+
+    python3 - "$repo_root" "$manifest" <<'PY'
 import hashlib
 import sys
 from pathlib import Path
@@ -130,15 +231,22 @@ PY
 }
 
 verify_matrix_contract() {
-    python3 - "$test_dir/matrix.tsv" <<'PY'
+    python3 - \
+        "$test_dir/matrix.tsv" \
+        "$release_control_sha" \
+        "PSAMA $psama_tag@$psama_sha V1-V9" \
+        "PSA $psa_tag@$psa_sha V1-V8" \
+        "$mysql_image" \
+        "$flyway_image" <<'PY'
 import csv
 import sys
 
 expected_header = [
     "deployment", "cell", "starting_state", "forward_migration_range", "release_control_sha",
     "core_auth_source", "core_picsure_source", "custom_start_source", "mysql_image",
-    "flyway_test_image", "deployment_migration_image", "deployment_flyway_version", "result",
-    "feature_sql_checksum_result", "remaining_assumptions",
+    "flyway_test_image", "deployment_migration_image", "deployment_flyway_version",
+    "start_custom_auth_max", "start_custom_picsure_max", "final_custom_auth_max",
+    "final_custom_picsure_max", "result", "feature_sql_checksum_result", "remaining_assumptions",
 ]
 with open(sys.argv[1], encoding="utf-8", newline="") as handle:
     reader = csv.DictReader(handle, delimiter="\t")
@@ -146,57 +254,90 @@ with open(sys.argv[1], encoding="utf-8", newline="") as handle:
     rows = list(reader)
 
 assert [row["cell"] for row in rows] == ["fresh", "supported-upgrade", "occurrence-only"]
-expected_cells = {
-    "fresh": {
-        "starting_state": "Empty auth and picsure schemas",
-        "forward_migration_range": "Core auth V1-V9; core PIC-SURE V1-V8; custom PIC-SURE baseline 1 plus V2-V12; custom auth baseline 1 plus V2-V11",
-        "custom_start_source": "Current Baseline custom directories at the tested commit",
-    },
-    "supported-upgrade": {
-        "starting_state": "Release 78c8a9ef core plus PSM v1.0.5 custom auth V2-V5 and custom PIC-SURE V2-V8",
-        "forward_migration_range": "Custom PIC-SURE V9-V12; custom auth V6-V11",
-        "custom_start_source": "PSM v1.0.5@84ad03076ce9f69f27ebb51d0efa5d3d43114ea4 Baseline",
-    },
-    "occurrence-only": {
-        "starting_state": "Release 78c8a9ef core plus custom auth V2-V5 and custom PIC-SURE V2-V10 with synthetic occurrence rows",
-        "forward_migration_range": "Custom PIC-SURE V11-V12; custom auth V6-V11",
-        "custom_start_source": "PSM v1.0.5@84ad03076ce9f69f27ebb51d0efa5d3d43114ea4 auth plus current PIC-SURE through V10",
-    },
-}
+release_control_sha, core_auth_source, core_picsure_source, mysql_image, flyway_image = sys.argv[2:]
 for row in rows:
     assert row["deployment"] == "AIO"
-    assert row["release_control_sha"] == "78c8a9efde3989afae9f137dac583c739667f59d"
-    assert row["core_auth_source"] == "PSAMA v4.2.2@ca8ac3641ba122a93cda8a5d7cad7f23f7a46bb6 V1-V9"
-    assert row["core_picsure_source"] == "PSA v2.27.2@88a767c273af776ca1edeb7be4d4365393e376f7 V1-V8"
-    assert row["mysql_image"] == "mysql:8.0"
-    assert row["flyway_test_image"] == "flyway/flyway:11.7.2"
+    assert row["release_control_sha"] == release_control_sha
+    assert row["core_auth_source"] == core_auth_source
+    assert row["core_picsure_source"] == core_picsure_source
+    assert row["mysql_image"] == mysql_image
+    assert row["flyway_test_image"] == flyway_image
     assert row["deployment_migration_image"] == "dbmi/pic-sure-db-migrations:pic-sure-db-migration_v1.0"
     assert row["deployment_flyway_version"] == "UNKNOWN"
-    assert row["result"] == "PASS"
-    assert row["feature_sql_checksum_result"] == "MATCH"
-    for key, value in expected_cells[row["cell"]].items():
-        assert row[key] == value, (row["cell"], key, row[key], value)
-    assert row["remaining_assumptions"] == "The embedded deployment Flyway version is undeclared; Jenkins and the later PostgreSQL dictionary stage are not executed"
+    for field in (
+        "start_custom_auth_max",
+        "start_custom_picsure_max",
+        "final_custom_auth_max",
+        "final_custom_picsure_max",
+    ):
+        assert row[field] == "NONE" or row[field].isdigit(), (row["cell"], field, row[field])
+    assert row["result"] in {"PASS", "FAIL"}
+    assert row["feature_sql_checksum_result"] in {"MATCH", "MISMATCH"}
+    for field in ("starting_state", "forward_migration_range", "custom_start_source", "remaining_assumptions"):
+        assert row[field].strip(), (row["cell"], field)
 PY
 }
 
-docker network create "$network_name" >/dev/null
-docker run --detach --name "$mysql_container" --network "$network_name" \
-    --env MYSQL_ROOT_PASSWORD="$password" "$mysql_image" >/dev/null
+verify_matrix_results() {
+    python3 - "$test_dir/matrix.tsv" "$executed_results" "$cell" <<'PY'
+import csv
+import sys
 
-mysql_ready=false
-for _ in {1..60}; do
-    if docker exec --env MYSQL_PWD="$password" "$mysql_container" \
-        mysqladmin --protocol=TCP --host=127.0.0.1 --user=root ping --silent >/dev/null 2>&1; then
-        mysql_ready=true
-        break
+with open(sys.argv[1], encoding="utf-8", newline="") as handle:
+    rows = {row["cell"]: row for row in csv.DictReader(handle, delimiter="\t")}
+with open(sys.argv[2], encoding="utf-8", newline="") as handle:
+    executed_rows = {row["cell"]: row for row in csv.DictReader(handle, delimiter="\t")}
+
+expected_cells = set(rows) if sys.argv[3] == "all" else {sys.argv[3]}
+assert set(executed_rows) == expected_cells, (set(executed_rows), expected_cells)
+for cell in expected_cells:
+    expected = rows[cell]
+    actual = executed_rows[cell]
+    for field, value in actual.items():
+        if field != "cell":
+            assert expected[field] == value, (cell, field, actual[field], expected[field])
+PY
+}
+
+record_matrix_result() {
+    local executed_cell="$1"
+    local start_auth_max="$2"
+    local start_picsure_max="$3"
+    local final_auth_max
+    local final_picsure_max
+
+    final_auth_max="$(mysql_exec auth --execute="SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_custom_schema_history WHERE success=1;")"
+    final_picsure_max="$(mysql_exec picsure --execute="SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_custom_schema_history WHERE success=1;")"
+
+    if [[ ! -f "$executed_results" ]]; then
+        printf 'cell\tstart_custom_auth_max\tstart_custom_picsure_max\tfinal_custom_auth_max\tfinal_custom_picsure_max\tresult\tfeature_sql_checksum_result\n' \
+            > "$executed_results"
     fi
-    sleep 1
-done
-if [[ "$mysql_ready" != true ]]; then
-    echo "MySQL did not accept connections within 60 seconds" >&2
-    exit 1
-fi
+    printf '%s\t%s\t%s\t%s\t%s\tPASS\tMATCH\n' \
+        "$executed_cell" "$start_auth_max" "$start_picsure_max" \
+        "$final_auth_max" "$final_picsure_max" >> "$executed_results"
+}
+
+start_mysql() {
+    local mysql_ready=false
+
+    docker network create "$network_name" >/dev/null
+    docker run --detach --name "$mysql_container" --network "$network_name" \
+        --env MYSQL_ROOT_PASSWORD="$password" "$mysql_image" >/dev/null
+
+    for _ in {1..60}; do
+        if docker exec --env MYSQL_PWD="$password" "$mysql_container" \
+            mysqladmin --protocol=TCP --host=127.0.0.1 --user=root ping --silent >/dev/null 2>&1; then
+            mysql_ready=true
+            break
+        fi
+        sleep 1
+    done
+    if [[ "$mysql_ready" != true ]]; then
+        echo "MySQL did not accept connections within 60 seconds" >&2
+        exit 1
+    fi
+}
 
 mysql_exec() {
     docker exec --interactive --env MYSQL_PWD="$password" "$mysql_container" \
@@ -248,17 +389,42 @@ import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
-replacements = {
-    "__APPLICATION_UUID__": sys.argv[2],
-    "__RESOURCE_UUID__": sys.argv[3],
-}
-for path in root.rglob("*.sql"):
-    value = path.read_text(encoding="utf-8")
-    for placeholder, replacement in replacements.items():
-        value = value.replace(placeholder, replacement)
-    path.write_text(value, encoding="utf-8")
+application_placeholder = "__APPLICATION_UUID__"
+resource_placeholder = "__RESOURCE_UUID__"
+auth_files = list((root / "auth").glob("*.sql"))
+picsure_files = list((root / "picsure").glob("*.sql"))
 
-remaining = [str(path) for path in root.rglob("*.sql") if "__APPLICATION_UUID__" in path.read_text(encoding="utf-8") or "__RESOURCE_UUID__" in path.read_text(encoding="utf-8")]
+wrong_scope = [
+    str(path)
+    for path in auth_files
+    if resource_placeholder in path.read_text(encoding="utf-8")
+]
+wrong_scope.extend(
+    str(path)
+    for path in picsure_files
+    if application_placeholder in path.read_text(encoding="utf-8")
+)
+assert not wrong_scope, f"placeholder found in wrong migration directory: {wrong_scope}"
+
+for path in auth_files:
+    value = path.read_text(encoding="utf-8")
+    path.write_text(
+        value.replace(application_placeholder, sys.argv[2]),
+        encoding="utf-8",
+    )
+for path in picsure_files:
+    value = path.read_text(encoding="utf-8")
+    path.write_text(
+        value.replace(resource_placeholder, sys.argv[3]),
+        encoding="utf-8",
+    )
+
+remaining = [
+    str(path)
+    for path in root.rglob("*.sql")
+    if application_placeholder in path.read_text(encoding="utf-8")
+    or resource_placeholder in path.read_text(encoding="utf-8")
+]
 assert not remaining, remaining
 PY
 }
@@ -325,15 +491,19 @@ assert_schema() {
 
     assert_equal "$(mysql_exec --execute="
         SELECT CONCAT(
-            (SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema='picsure' AND table_name IN ('banner_occurrence', 'banner_version', 'banner_priority_allocator') AND constraint_type='PRIMARY KEY'), ':',
-            (SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema='picsure' AND table_name='banner_occurrence' AND constraint_name='fk_banner_occurrence_restore' AND constraint_type='FOREIGN KEY'), ':',
-            (SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema='picsure' AND table_name='banner_version' AND constraint_name='fk_banner_version_occurrence' AND constraint_type='FOREIGN KEY'), ':',
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_occurrence' AND constraint_name='PRIMARY' AND column_name='uuid' AND ordinal_position=1), ':',
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_version' AND constraint_name='PRIMARY' AND column_name='uuid' AND ordinal_position=1), ':',
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_priority_allocator' AND constraint_name='PRIMARY' AND column_name='id' AND ordinal_position=1), ':',
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_occurrence' AND constraint_name='fk_banner_occurrence_restore' AND column_name='restored_from_uuid' AND referenced_table_schema='picsure' AND referenced_table_name='banner_occurrence' AND referenced_column_name='uuid'), ':',
+            (SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_version' AND constraint_name='fk_banner_version_occurrence' AND column_name='banner_uuid' AND referenced_table_schema='picsure' AND referenced_table_name='banner_occurrence' AND referenced_column_name='uuid'), ':',
             (SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema='picsure' AND table_name='banner_version' AND constraint_name='uq_banner_version_number' AND constraint_type='UNIQUE'), ':',
-            (SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema='picsure' AND table_name='banner_priority_allocator' AND constraint_name='chk_banner_priority_allocator_singleton' AND constraint_type='CHECK'), ':',
+            (SELECT GROUP_CONCAT(column_name ORDER BY ordinal_position) FROM information_schema.key_column_usage WHERE constraint_schema='picsure' AND table_name='banner_version' AND constraint_name='uq_banner_version_number'), ':',
+            (SELECT LOWER(REPLACE(REPLACE(check_clause, CHAR(96), ''), ' ', '')) FROM information_schema.check_constraints WHERE constraint_schema='picsure' AND constraint_name='chk_banner_priority_allocator_singleton'), ':',
             (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema='picsure' AND table_name='banner_occurrence' AND index_name='idx_banner_occurrence_active'), ':',
             (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema='picsure' AND table_name='banner_occurrence' AND index_name='idx_banner_occurrence_priority')
         );")" \
-        "3:1:1:1:1:status,start_at,end_at,priority:priority" "banner constraints and indexes"
+        "1:1:1:1:1:1:banner_uuid,version_number:(id=1):status,start_at,end_at,priority:priority" \
+        "banner constraints and indexes"
 }
 
 assert_authorization() {
@@ -354,6 +524,11 @@ assert_authorization() {
         JOIN privilege p ON p.uuid = rp.privilege_id
         WHERE r.name = 'PIC-SURE User' AND p.name = 'BANNER_MANAGEMENT';")" \
         "0" "ordinary-user banner management denial"
+    assert_equal "$(mysql_exec auth --execute="
+        SELECT CONCAT(
+            (SELECT COUNT(*) FROM privilege p JOIN application a ON a.uuid=p.application_id WHERE p.name='BANNER_MANAGEMENT' AND a.name='PICSURE'), ':',
+            (SELECT COUNT(*) FROM accessRule_privilege arp JOIN privilege p ON p.uuid=arp.privilege_id JOIN access_rule ar ON ar.uuid=arp.accessRule_id WHERE p.name='BANNER_MANAGEMENT' AND ar.name='AR_BANNER_MANAGEMENT_GATEWAY')
+        );")" "1:1" "banner management privilege ownership and access-rule link"
 
     python3 - "$pattern" "$repo_root/tests/banner-authorization-migration/routes.tsv" <<'PY'
 import re
@@ -392,17 +567,22 @@ run_fresh() {
     echo "Running AIO matrix cell: fresh"
     reset_databases
     run_core_migrations
+    assert_equal "$(mysql_exec --execute="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema IN ('auth', 'picsure') AND table_name='flyway_custom_schema_history';")" \
+        "0" "fresh custom migration history"
     copy_custom_set "$repo_root/Baseline" "$custom_root"
     run_custom_migrations "$custom_root"
     assert_final_common
     assert_equal "$(mysql_exec picsure --execute="SELECT CONCAT(COUNT(*), ':', MIN(next_priority), ':', MAX(next_priority)) FROM banner_priority_allocator;")" \
         "1:1:1" "fresh allocator"
+    record_matrix_result fresh NONE NONE
     echo "AIO matrix cell PASS: fresh"
 }
 
 run_supported_upgrade() {
     local release_custom="$tmp_root/cells/supported-release"
     local final_custom="$tmp_root/cells/supported-final"
+    local start_auth_max
+    local start_picsure_max
 
     echo "Running AIO matrix cell: supported-upgrade"
     reset_databases
@@ -411,6 +591,8 @@ run_supported_upgrade() {
     run_custom_migrations "$release_custom"
     assert_history auth flyway_custom_schema_history 5 5
     assert_history picsure flyway_custom_schema_history 8 6
+    start_auth_max="$(mysql_exec auth --execute="SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_custom_schema_history WHERE success=1;")"
+    start_picsure_max="$(mysql_exec picsure --execute="SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_custom_schema_history WHERE success=1;")"
     mysql_exec < "$test_dir/supported-data.sql"
     copy_custom_set "$repo_root/Baseline" "$final_custom"
     run_custom_migrations "$final_custom"
@@ -422,12 +604,15 @@ run_supported_upgrade() {
         );")" "1:1" "supported-upgrade synthetic data"
     assert_equal "$(mysql_exec picsure --execute="SELECT CONCAT(COUNT(*), ':', MIN(next_priority), ':', MAX(next_priority)) FROM banner_priority_allocator;")" \
         "1:1:1" "supported-upgrade allocator"
+    record_matrix_result supported-upgrade "$start_auth_max" "$start_picsure_max"
     echo "AIO matrix cell PASS: supported-upgrade"
 }
 
 run_occurrence_only() {
     local intermediate_custom="$tmp_root/cells/occurrence-intermediate"
     local final_custom="$tmp_root/cells/occurrence-final"
+    local start_auth_max
+    local start_picsure_max
 
     echo "Running AIO matrix cell: occurrence-only"
     reset_databases
@@ -436,6 +621,8 @@ run_occurrence_only() {
     run_custom_migrations "$intermediate_custom"
     assert_history auth flyway_custom_schema_history 5 5
     assert_history picsure flyway_custom_schema_history 10 8
+    start_auth_max="$(mysql_exec auth --execute="SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_custom_schema_history WHERE success=1;")"
+    start_picsure_max="$(mysql_exec picsure --execute="SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_custom_schema_history WHERE success=1;")"
     mysql_exec < "$test_dir/occurrence-only.sql"
     copy_custom_set "$repo_root/Baseline" "$final_custom"
     run_custom_migrations "$final_custom"
@@ -444,23 +631,27 @@ run_occurrence_only() {
         SELECT CONCAT(
             (SELECT COUNT(*) FROM banner_version WHERE banner_uuid=UUID_TO_BIN('00000000-0000-0000-0000-000000000001') AND version_number=1 AND actor='publisher@example.org' AND effective_at='2026-08-27 12:00:00.000000'), ':',
             (SELECT COUNT(*) FROM banner_version WHERE banner_uuid=UUID_TO_BIN('00000000-0000-0000-0000-000000000002') AND version_number=1 AND actor='SYSTEM_MIGRATION' AND effective_at='2026-08-27 13:00:00.000000'), ':',
+            (SELECT COUNT(*) FROM banner_version WHERE banner_uuid=UUID_TO_BIN('00000000-0000-0000-0000-000000000004') AND version_number=1 AND actor='expired-publisher@example.org' AND effective_at='2000-01-01 00:00:00.000000'), ':',
             (SELECT COUNT(*) FROM banner_version WHERE banner_uuid=UUID_TO_BIN('00000000-0000-0000-0000-000000000003')), ':',
             (SELECT COUNT(*) FROM banner_version)
-        );")" "1:1:0:2" "occurrence version backfill"
+        );")" "1:1:1:0:3" "occurrence version backfill"
     assert_equal "$(mysql_exec picsure --execute="
         SELECT GROUP_CONCAT(CONCAT(BIN_TO_UUID(uuid), '=', priority) ORDER BY priority SEPARATOR ',')
         FROM banner_occurrence;")" \
-        "00000000-0000-0000-0000-000000000001=4,00000000-0000-0000-0000-000000000003=9,00000000-0000-0000-0000-000000000002=40" \
+        "00000000-0000-0000-0000-000000000001=4,00000000-0000-0000-0000-000000000002=40,00000000-0000-0000-0000-000000000004=80,00000000-0000-0000-0000-000000000003=90" \
         "occurrence priorities"
     assert_equal "$(mysql_exec picsure --execute="SELECT CONCAT(COUNT(*), ':', MIN(next_priority), ':', MAX(next_priority)) FROM banner_priority_allocator;")" \
         "1:41:41" "occurrence allocator"
+    record_matrix_result occurrence-only "$start_auth_max" "$start_picsure_max"
     echo "AIO matrix cell PASS: occurrence-only"
 }
 
 prepare_sources
 verify_release_overlap
-verify_feature_checksums
+verify_checksum_manifest "$test_dir/feature-sql.sha256"
+verify_checksum_manifest "$test_dir/occurrence-intermediate-sql.sha256"
 verify_matrix_contract
+start_mysql
 
 case "$cell" in
     fresh) run_fresh ;;
@@ -478,4 +669,5 @@ case "$cell" in
         ;;
 esac
 
+verify_matrix_results
 echo "AIO deployment-owned banner migration proof PASS: $cell"
