@@ -6,12 +6,14 @@ on:
     paths:
       - 'Baseline/auth/V6__ADD_BANNER_MANAGEMENT_ACCESS_RULE.sql'
       - 'Baseline/auth/V7__EXPAND_BANNER_MANAGEMENT_ACCESS_RULE.sql'
+      - 'Baseline/auth/V8__AUTHORIZE_BANNER_REORDER.sql'
       - 'tests/banner-authorization-migration/**'
       - '.github/workflows/banner-authorization-migration.yml'
   pull_request:
     paths:
       - 'Baseline/auth/V6__ADD_BANNER_MANAGEMENT_ACCESS_RULE.sql'
       - 'Baseline/auth/V7__EXPAND_BANNER_MANAGEMENT_ACCESS_RULE.sql'
+      - 'Baseline/auth/V8__AUTHORIZE_BANNER_REORDER.sql'
       - 'tests/banner-authorization-migration/**'
       - '.github/workflows/banner-authorization-migration.yml'
 

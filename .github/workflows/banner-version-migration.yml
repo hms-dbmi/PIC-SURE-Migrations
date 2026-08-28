@@ -6,12 +6,14 @@ on:
     paths:
       - 'Baseline/picsure/V10__CREATE_BANNER_OCCURRENCE.sql'
       - 'Baseline/picsure/V11__CREATE_BANNER_VERSION.sql'
+      - 'Baseline/picsure/V12__CREATE_BANNER_PRIORITY_ALLOCATOR.sql'
       - 'tests/banner-version-migration/**'
       - '.github/workflows/banner-version-migration.yml'
   pull_request:
     paths:
       - 'Baseline/picsure/V10__CREATE_BANNER_OCCURRENCE.sql'
       - 'Baseline/picsure/V11__CREATE_BANNER_VERSION.sql'
+      - 'Baseline/picsure/V12__CREATE_BANNER_PRIORITY_ALLOCATOR.sql'
       - 'tests/banner-version-migration/**'
       - '.github/workflows/banner-version-migration.yml'
 
@@ -26,3 +28,4 @@ jobs:
           tests/banner-version-migration/test.sh
           Baseline/picsure/V10__CREATE_BANNER_OCCURRENCE.sql
           Baseline/picsure/V11__CREATE_BANNER_VERSION.sql
+          Baseline/picsure/V12__CREATE_BANNER_PRIORITY_ALLOCATOR.sql

@@ -6,13 +6,15 @@ fixture="$repo_root/tests/banner-authorization-migration/routes.tsv"
 before="$repo_root/tests/banner-authorization-migration/before.sql"
 add_migration="$repo_root/Baseline/auth/V6__ADD_BANNER_MANAGEMENT_ACCESS_RULE.sql"
 expand_migration="$repo_root/Baseline/auth/V7__EXPAND_BANNER_MANAGEMENT_ACCESS_RULE.sql"
+reorder_migration="$repo_root/Baseline/auth/V8__AUTHORIZE_BANNER_REORDER.sql"
 container="banner-auth-aio-${GITHUB_RUN_ID:-local}-$$"
 password="banner-auth-test"
 
-for file in "$fixture" "$before" "$add_migration" "$expand_migration"; do
+for file in "$fixture" "$before" "$add_migration" "$expand_migration" "$reorder_migration"; do
   test -f "$file" || { echo "Missing required file: $file" >&2; exit 1; }
 done
 test "$(realpath "$add_migration")" != "$(realpath "$expand_migration")"
+test "$(realpath "$expand_migration")" != "$(realpath "$reorder_migration")"
 
 cleanup() {
   docker rm -f "$container" >/dev/null 2>&1 || true
@@ -36,6 +38,8 @@ mysql_exec < "$before"
 mysql_exec < "$add_migration"
 mysql_exec -e "UPDATE auth.access_rule SET value = 'unexpected-pre-expansion-value' WHERE name = 'AR_BANNER_MANAGEMENT_GATEWAY';"
 mysql_exec < "$expand_migration"
+mysql_exec -e "UPDATE auth.access_rule SET value = 'unexpected-pre-reorder-value' WHERE name = 'AR_BANNER_MANAGEMENT_GATEWAY';"
+mysql_exec < "$reorder_migration"
 
 pattern="$(mysql_exec -e "SELECT value FROM auth.access_rule WHERE name = 'AR_BANNER_MANAGEMENT_GATEWAY';")"
 granted_roles="$(mysql_exec -e "
