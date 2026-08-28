@@ -1,0 +1,27 @@
+name: Banner authorization migration
+
+on:
+  push:
+    paths:
+      - 'Baseline/auth/V6__ADD_BANNER_MANAGEMENT_ACCESS_RULE.sql'
+      - 'Baseline/auth/V7__EXPAND_BANNER_MANAGEMENT_ACCESS_RULE.sql'
+      - 'tests/banner-authorization-migration/**'
+      - '.github/workflows/banner-authorization-migration.yml'
+  pull_request:
+    paths:
+      - 'Baseline/auth/V6__ADD_BANNER_MANAGEMENT_ACCESS_RULE.sql'
+      - 'Baseline/auth/V7__EXPAND_BANNER_MANAGEMENT_ACCESS_RULE.sql'
+      - 'tests/banner-authorization-migration/**'
+      - '.github/workflows/banner-authorization-migration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run actual AIO authorization migrations on MySQL 8
+        run: tests/banner-authorization-migration/test.sh
