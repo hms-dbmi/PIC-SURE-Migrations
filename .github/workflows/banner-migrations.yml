@@ -1,0 +1,28 @@
+name: Banner migrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Baseline/auth/V7__ADD_BANNER_MANAGEMENT_ACCESS_RULE.sql'
+      - 'Baseline/picsure/V10__CREATE_BANNER_TABLES.sql'
+      - 'tests/banner-migrations/**'
+      - '.github/workflows/banner-migrations.yml'
+  pull_request:
+    paths:
+      - 'Baseline/auth/V7__ADD_BANNER_MANAGEMENT_ACCESS_RULE.sql'
+      - 'Baseline/picsure/V10__CREATE_BANNER_TABLES.sql'
+      - 'tests/banner-migrations/**'
+      - '.github/workflows/banner-migrations.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run the banner migrations on MySQL 8
+        run: tests/banner-migrations/test.sh
