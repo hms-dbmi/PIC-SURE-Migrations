@@ -1,6 +1,10 @@
 -- Rollout requirement: PSAMA caches merged access rules per user and application in `mergedRulesCache` and
 -- `preProcessedAccessRules`, so on an existing install the new privilege attachment is not visible to
 -- already-cached sessions. Restart the PSAMA instances or evict both caches after this migration runs.
+--
+-- Lets PSAMA authorize the MCP endpoint the gateway serves at /mcp. PSAMA denies any path that no access rule
+-- matches, so without this rule every /mcp request is refused. The rule only admits the path; data
+-- authorization for the tools behind it stays with PSAMA's existing rules.
 use auth;
 
 INSERT INTO access_rule (
