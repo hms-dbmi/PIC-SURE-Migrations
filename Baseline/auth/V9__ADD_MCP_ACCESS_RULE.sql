@@ -1,3 +1,9 @@
+-- PIC_SURE_MCP lets a caller's own agent read counts and dictionary data through /mcp, outside the assistant, so it is
+-- granted deliberately and not to every user: only PIC-SURE Top Admin holds it. Grant it to any other role that
+-- should reach MCP. The open-access role never holds it, and pic-sure-mcp refuses open-access callers regardless.
+-- pic-sure-ai-service's own /mcp calls do not need it; the gateway authorizes them against the assistant's rule
+-- (AR_AI_SERVICE_CALLER, ASSISTED_SEARCH) when it verifies the AI service token.
+--
 -- Rollout requirement: PSAMA caches merged access rules per user and application in `mergedRulesCache` and
 -- `preProcessedAccessRules`, so on an existing install the new privilege attachment is not visible to
 -- already-cached sessions. Restart the PSAMA instances or evict both caches after this migration runs.
@@ -40,7 +46,7 @@ AND NOT EXISTS (
 INSERT INTO role_privilege (role_id, privilege_id)
 SELECT role.uuid, @mcpPrivilege
 FROM role
-WHERE role.name IN ('MANUAL_ROLE_OPEN_ACCESS', 'PIC-SURE User', 'Admin', 'PIC-SURE Top Admin')
+WHERE role.name IN ('PIC-SURE Top Admin')
 AND NOT EXISTS (
     SELECT 1
     FROM role_privilege existing
